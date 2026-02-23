@@ -1,0 +1,229 @@
+{
+  "type": "grid",
+  "data": {
+    "columns": 24,
+    "rowHeight": 20,
+    "maxWidth": 1400,
+    "bordered": true,
+    "cells": [
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          0,
+          6,
+          6
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          6,
+          24,
+          2
+        ]
+      },
+      {
+        "position": [
+          0,
+          8,
+          24,
+          40
+        ]
+      },
+      {
+        "position": [
+          0,
+          51,
+          6,
+          3
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          54,
+          12,
+          18
+        ]
+      },
+      {
+        "position": [
+          12,
+          51,
+          6,
+          3
+        ]
+      },
+      {
+        "position": [
+          12,
+          54,
+          12,
+          18
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          75,
+          5,
+          3
+        ]
+      },
+      {
+        "position": [
+          0,
+          78,
+          12,
+          2
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          80,
+          12,
+          16
+        ]
+      },
+      {
+        "position": [
+          12,
+          75,
+          5,
+          3
+        ]
+      },
+      {
+        "position": [
+          12,
+          78,
+          12,
+          2
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          12,
+          80,
+          12,
+          16
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          99,
+          6,
+          3
+        ]
+      },
+      {
+        "position": [
+          0,
+          102,
+          12,
+          2
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          0,
+          104,
+          12,
+          16
+        ]
+      },
+      {
+        "position": [
+          12,
+          99,
+          6,
+          3
+        ]
+      },
+      {
+        "position": [
+          12,
+          102,
+          12,
+          2
+        ]
+      },
+      {
+        "position": null
+      },
+      {
+        "position": [
+          12,
+          104,
+          12,
+          16
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+SS_HEADERS = {
+    'accept': '*/*',
+    'accept-language': 'en-US,en;q=0.9',
+    'baggage': 'sentry-environment=production,sentry-release=JKHIgZGaaASs_HcWx8Q1i,sentry-public_key=d693747a6bb242d9bb9cf7069fb57988,sentry-trace_id=c58c6e4d1108a9a34950493b2f5dbaee',
+    'cache-control': 'max-age=0',
+    'if-none-match': 'W/"ed334e5cb1"',
+    'priority': 'u=1, i',
+    'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'sentry-trace': 'c58c6e4d1108a9a34950493b2f5dbaee-934eb663405e4704',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+    'x-requested-with': '42163a',
+    # 'cookie': '_gcl_au=1.1.737909263.1765361977; _ga=GA1.1.523819597.1765361977; g_state={"i_l":0,"i_ll":1765362037312}; _ga_LL3JHFY8FL=GS2.1.s1765643012$o2$g0$t1765643422$j60$l0$h0; cto_bundle=1hhrD19Hbmp5ekxNTVE1cVFia0FtSHVBTnBJS2VjRFklMkIlMkYwUEMzS3lTV21kTHo5MkRWTGJzTzJKN2FKS0hOJTJCcXdIJTJGVlZacDZPdGtvTFZWUnE2V1NaUkIzRUNyUFkwY3ZacXV1ejVTUWpIYVozdUhXQ0JHTll2c0s0UVlXYkJtMGclMkYlMkZJWDBYSDNhWFBQdndJdmJidmFSUk1jJTJCdyUzRCUzRA; FCCDCF=%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5B32%2C%22%5B%5C%22610e4a03-ac76-4b39-b013-b66adb8c682f%5C%22%2C%5B1765361976%2C531000000%5D%5D%22%5D%5D%5D; FCNEC=%5B%5B%22AKsRol_TyhVOeHBoLyhWyh8_ptf6nzNrR_pg5nNO3CD3c3Cp3WgxzCVq7w982pvkP3No0oi4DTnaop25Iu6lvIqL6uO2ZtQidwOtjPYjdj6sGqAA6ShDaM4qHkaYulDPLR2rm8ibNXhTzRG1bpM3NWUhNG5baWg_ow%3D%3D%22%5D%5D; _ga_HNQ9P9MGZR=GS2.1.s1767095591$o37$g1$t1767097278$j16$l0$h0',
+}
