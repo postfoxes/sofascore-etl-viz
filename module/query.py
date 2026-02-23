@@ -1107,3 +1107,226 @@ def get_match_ids_per_round(client, comp_id, season_id, round_num):
     match_ids = [match['match_id'] for match in query]
     
     return match_ids
+
+def get_gk_detailed_stats(client, comp_id, season_id, player_id):
+    db = client['sofascore_data']
+
+    # Pastikan query ini mengembalikan list match_ids yang valid
+    match_ids = get_match_by_player_id(client, player_id)
+
+    pipeline = [
+        {"$match": {"match_id": {"$in": match_ids}}},
+        {
+            "$project": {
+                "match_id": 1,
+                "player_status": {
+                    "$cond": {
+                        "if": {"$in": [player_id, "$home_starting.id"]}, "then": "home_start",
+                        "else": {
+                            "$cond": {
+                                "if": {"$in": [player_id, "$away_starting.id"]}, "then": "away_start",
+                                "else": {
+                                    "$cond": {
+                                        "if": {"$in": [player_id, "$home_bench.id"]}, "then": "home_sub",
+                                        "else": "away_sub"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "relevant_sub": {
+                    "$filter": {
+                        "input": {"$concatArrays": [{"$ifNull": ["$home_subs", []]}, {"$ifNull": ["$away_subs", []]}]},
+                        "as": "sub",
+                        "cond": {"$or": [{"$eq": ["$$sub.player_out_id", player_id]}, {"$eq": ["$$sub.player_in_id", player_id]}]}
+                    }
+                },
+                "red_card": {
+                    "$filter": {
+                        "input": {"$ifNull": ["$incidents", []]},
+                        "as": "inc",
+                        "cond": {
+                            "$and": [
+                                {"$eq": ["$$inc.player_id", player_id]},
+                                {"$eq": ["$$inc.incident_type", "card"]},
+                                {"$eq": ["$$inc.card_type", "red"]}
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        {"$addFields": { "relevant_sub": { "$sortArray": { "input": "$relevant_sub", "sortBy": { "time": 1 } } } }},
+        {
+            "$addFields": {
+                "time_range": {
+                    "$let": {
+                        "vars": {
+                            "sub_count": {"$size": "$relevant_sub"},
+                            "rc_time": {"$ifNull": [{"$first": "$red_card.time"}, 999]},
+                            "first_sub": {"$first": "$relevant_sub.time"},
+                            "second_sub": {"$arrayElemAt": ["$relevant_sub.time", 1]}
+                        },
+                        "in": {
+                            "$switch": {
+                                "branches": [
+                                    {"case": {"$regexMatch": {"input": "$player_status", "regex": "start"}}, 
+                                     "then": {"start": 0, "end": {"$min": [{"$ifNull": ["$$first_sub", 999]}, "$$rc_time"]}}},
+                                    {"case": {"$gt": ["$$sub_count", 0]}, 
+                                     "then": {"start": "$$first_sub", "end": {"$min": [{"$ifNull": ["$$second_sub", 999]}, "$$rc_time"]}}}
+                                ],
+                                "default": {"start": -1, "end": -1}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        # Join dengan player_match_stats
+        {
+            "$lookup": {
+                "from": "player_match_stats",
+                "let": {"m_id": "$match_id", "p_id": player_id},
+                "pipeline": [
+                    {"$match": {"$expr": {"$and": [{"$eq": ["$match_id", "$$m_id"]}, {"$eq": ["$player_id", "$$p_id"]}]}}}
+                ],
+                "as": "raw_stats"
+            }
+        },
+        # Join dengan match_shotmaps
+        {
+            "$lookup": {
+                "from": "match_shotmaps",
+                "let": {
+                    "s_min": "$time_range.start", "e_min": "$time_range.end",
+                    "gk_side": {"$regexMatch": {"input": "$player_status", "regex": "home"}},
+                    "curr_m_id": "$match_id"
+                },
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$match_id", "$$curr_m_id"]}}},
+                    {"$unwind": "$shotmap"},
+                    {"$match": {
+                        "$expr": {
+                            "$and": [
+                                {"$ne": ["$shotmap.is_home", "$$gk_side"]},
+                                {"$gte": ["$shotmap.time", "$$s_min"]},
+                                {"$lte": ["$shotmap.time", "$$e_min"]},
+                                {"$not": [{"$in": ["$shotmap.shot_type", ["block", "miss"]]}]}
+                            ]
+                        }
+                    }},
+                    {"$replaceRoot": {"newRoot": "$shotmap"}}
+                ],
+                "as": "shots_conceded"
+            }
+        },
+        # Join dengan match_stats untuk Ball Possession
+        {
+            "$lookup": {
+                "from": "match_stats",
+                "let": {
+                    "curr_m_id": "$match_id",
+                    "is_home_check": {"$cond": [{"$regexMatch": {"input": "$player_status", "regex": "home"}}, 1, 2]}
+                },
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$match_id", "$$curr_m_id"]}}},
+                    {"$project": {
+                        "stat_item": {
+                            "$first": {
+                                "$filter": {
+                                    "input": "$statistics",
+                                    "as": "st",
+                                    "cond": {"$eq": ["$$st.key", "ballPossession"]}
+                                }
+                            }
+                        }
+                    }},
+                    {"$project": {
+                        "val": {
+                            "$cond": {
+                                "if": {"$eq": ["$$is_home_check", 1]},
+                                "then": "$stat_item.awayValue",
+                                "else": "$stat_item.homeValue"
+                            }
+                        }
+                    }}
+                ],
+                "as": "possession_res"
+            }
+        },
+        {"$addFields": {"ball_possession": {"$first": "$possession_res.val"}}}
+    ]
+
+    results = db['match_lineups'].aggregate(pipeline)
+    final_output = []
+
+    for doc in results:
+        # Jika kiper tidak bermain, lompati
+        if doc['time_range']['start'] == -1:
+            continue
+
+        # Ekstraksi statistik dasar
+        raw_stat = doc['raw_stats'][0].get('statistics', {}) if doc['raw_stats'] else {}
+
+        xgot_pen = 0
+        xgot_no_pen = 0
+        goal_pen = 0
+        goal_no_pen = 0
+        player_scored_list = []
+
+        for shot in doc.get('shots_conceded', []):
+            # Ambil data yang sering digunakan satu kali di awal
+            shot_type = shot.get('shot_type')
+            situation = shot.get('situation')
+            xgot_value = shot.get('xgot', 0)
+        
+            # Logika penghitungan Goal dan List Pemain
+            if shot_type == 'goal':
+                if shot.get('goal_type') == 'penalty':
+                    goal_pen += 1
+                else:
+                    goal_no_pen += 1 
+        
+                player_scored_list.append({
+                    'player_name': shot.get('player_name'),
+                    'player_id': shot.get('player_id'),
+                })
+            
+            # Logika penghitungan xGOT berdasarkan situasi penalti atau bukan
+            if situation == 'penalty':
+                xgot_pen += xgot_value
+            else:
+                xgot_no_pen += xgot_value
+
+
+        stat_entry = {
+            'min_played': raw_stat.get('minutesPlayed', 0),
+            'ball_possession_opp': doc.get('ball_possession'),
+            'total_pass': raw_stat.get('totalPass', 0),
+            'acc_pass': raw_stat.get('accuratePass', 0),
+            'total_long_pass': raw_stat.get('totalLongBalls', 0),
+            'acc_long_pass': raw_stat.get('accurateLongBalls', 0),
+            'total_short_pass': raw_stat.get('totalPass', 0) - raw_stat.get('totalLongBalls', 0),
+            'acc_short_pass':  raw_stat.get('accuratePass', 0) - raw_stat.get('accurateLongBalls', 0),
+            'duel_won': raw_stat.get('duelWon', 0),
+            'total_duel': raw_stat.get('duelWon', 0) + raw_stat.get('duelLost', 0),
+            'aerial_duel_won': raw_stat.get('aerialWon', 0),
+            'total_aerial_duel': raw_stat.get('aerialWon', 0) + raw_stat.get('aerialLost', 0),
+            'cross_claim': raw_stat.get('goodHighClaim', 0),
+            'total_cross': raw_stat.get('goodHighClaim', 0) + raw_stat.get('crossNotClaimed', 0),
+            'saves': raw_stat.get('saves', 0),
+            'interception': raw_stat.get('interceptionWon', 0),
+            'xgot_pen': xgot_pen,
+            'xgot_no_pen': xgot_no_pen,
+            'cd_goal_no_pen': goal_no_pen,
+            'cd_goal_pen': goal_pen,
+            'total_goal_concede': goal_pen + goal_no_pen
+        }
+
+        final_output.append({
+            'match_id': doc['match_id'],
+            'statistics': stat_entry,
+        })
+
+    return final_output
