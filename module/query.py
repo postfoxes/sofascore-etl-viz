@@ -1,4 +1,5 @@
 from pymongo import MongoClient
+import pandas as pd
 
 def get_comp_manual(client):
     db = client["sofascore_data"]
@@ -1363,3 +1364,230 @@ def get_gk_detailed_stats(client, player_id):
         })
 
     return final_output
+
+def get_gks_detailed_stats(client, player_ids):
+    db = client['sofascore_data']
+
+    # 1. Ambil list match_id yang relevan untuk semua player
+    player_matches_data = get_matches_by_list_player_id(client, player_ids)
+    all_match_ids = list(set([m_id for p in player_matches_data for m_id in p['match_ids']]))
+
+    pipeline = [
+        # Filter awal: Hanya ambil match yang dimainkan oleh salah satu dari player_ids
+        {"$match": {"match_id": {"$in": all_match_ids}}},
+        
+        # Buat array berisi semua kategori pemain untuk di-unwind
+        {"$project": {
+            "match_id": 1,
+            "home_starting": 1, "away_starting": 1, 
+            "home_bench": 1, "away_bench": 1,
+            "home_subs": 1, "away_subs": 1, "incidents": 1
+        }},
+        
+        # Trick: Gunakan $concatArrays lalu $unwind agar kita bisa memproses per-pemain per-match
+        {"$addFields": {
+            "all_target_players": {
+                "$filter": {
+                    "input": {"$concatArrays": [
+                        {"$ifNull": ["$home_starting", []]}, 
+                        {"$ifNull": ["$away_starting", []]},
+                        {"$ifNull": ["$home_bench", []]}, 
+                        {"$ifNull": ["$away_bench", []]}
+                    ]},
+                    "as": "p",
+                    "cond": {"$in": ["$$p.id", player_ids]}
+                }
+            }
+        }},
+        {"$unwind": "$all_target_players"},
+        {"$addFields": {"curr_p_id": "$all_target_players.id"}},
+
+        # 2. Penentuan Player Status secara Dinamis
+        {"$addFields": {
+            "player_status": {
+                "$cond": {
+                    "if": {"$in": ["$curr_p_id", "$home_starting.id"]}, "then": "home_start",
+                    "else": {
+                        "$cond": {
+                            "if": {"$in": ["$curr_p_id", "$away_starting.id"]}, "then": "away_start",
+                            "else": {
+                                "$cond": {
+                                    "if": {"$in": ["$curr_p_id", "$home_bench.id"]}, "then": "home_sub",
+                                    "else": "away_sub"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }},
+
+        # 3. Filter Substitusi dan Red Card khusus untuk player yang sedang di-unwind
+        {"$addFields": {
+            "relevant_sub": {
+                "$filter": {
+                    "input": {"$concatArrays": [{"$ifNull": ["$home_subs", []]}, {"$ifNull": ["$away_subs", []]}]},
+                    "as": "sub",
+                    "cond": {"$or": [{"$eq": ["$$sub.player_out_id", "$curr_p_id"]}, {"$eq": ["$$sub.player_in_id", "$curr_p_id"]}]}
+                }
+            },
+            "red_card": {
+                "$filter": {
+                    "input": {"$ifNull": ["$incidents", []]},
+                    "as": "inc",
+                    "cond": {
+                        "$and": [
+                            {"$eq": ["$$inc.player_id", "$curr_p_id"]},
+                            {"$eq": ["$$inc.incident_type", "card"]},
+                            {"$eq": ["$$inc.card_type", "red"]}
+                        ]
+                    }
+                }
+            }
+        }},
+
+        {"$addFields": { "relevant_sub": { "$sortArray": { "input": "$relevant_sub", "sortBy": { "time": 1 } } } }},
+
+        # 4. Kalkulasi Time Range (Kapan pemain ada di lapangan)
+        {"$addFields": {
+            "time_range": {
+                "$let": {
+                    "vars": {
+                        "sub_count": {"$size": "$relevant_sub"},
+                        "rc_time": {"$ifNull": [{"$first": "$red_card.time"}, 999]},
+                        "first_sub": {"$first": "$relevant_sub.time"},
+                        "second_sub": {"$arrayElemAt": ["$relevant_sub.time", 1]}
+                    },
+                    "in": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$regexMatch": {"input": "$player_status", "regex": "start"}}, 
+                                 "then": {"start": 0, "end": {"$min": [{"$ifNull": ["$$first_sub", 999]}, "$$rc_time"]}}},
+                                {"case": {"$gt": ["$$sub_count", 0]}, 
+                                 "then": {"start": "$$first_sub", "end": {"$min": [{"$ifNull": ["$$second_sub", 999]}, "$$rc_time"]}}}
+                            ],
+                            "default": {"start": -1, "end": -1}
+                        }
+                    }
+                }
+            }
+        }},
+
+        # 5. Lookups (Menggunakan curr_p_id yang dinamis)
+        {
+            "$lookup": {
+                "from": "player_match_stats",
+                "let": {"m_id": "$match_id", "p_id": "$curr_p_id"},
+                "pipeline": [
+                    {"$match": {"$expr": {"$and": [{"$eq": ["$match_id", "$$m_id"]}, {"$eq": ["$player_id", "$$p_id"]}]}}},
+                    # Tambahkan project di sini untuk mengambil name
+                    {"$project": {"_id": 0, "name": 1, "statistics": 1}}
+                ],
+                "as": "raw_stats"
+            }
+        },
+        {
+            "$lookup": {
+                "from": "match_shotmaps",
+                "let": {
+                    "s_min": "$time_range.start", "e_min": "$time_range.end",
+                    "gk_side": {"$regexMatch": {"input": "$player_status", "regex": "home"}},
+                    "curr_m_id": "$match_id"
+                },
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$match_id", "$$curr_m_id"]}}},
+                    {"$unwind": "$shotmap"},
+                    {"$match": {
+                        "$expr": {
+                            "$and": [
+                                {"$ne": ["$shotmap.is_home", "$$gk_side"]},
+                                {"$gte": ["$shotmap.time", "$$s_min"]},
+                                {"$lte": ["$shotmap.time", "$$e_min"]},
+                                {"$not": [{"$in": ["$shotmap.shot_type", ["block", "miss"]]}]}
+                            ]
+                        }
+                    }},
+                    {"$replaceRoot": {"newRoot": "$shotmap"}}
+                ],
+                "as": "shots_conceded"
+            }
+        }
+    ]
+
+    results = db['match_lineups'].aggregate(pipeline)
+    
+    # --- LOGIKA AGREGASI DI PYTHON ---
+    players_stats = {}
+
+    for doc in results:
+        p_id = doc['curr_p_id']
+        p_name = doc['raw_stats'][0].get('name', 'Unknown') if doc['raw_stats'] else 'Unknown'
+        
+        if p_id not in players_stats:
+            players_stats[p_id] = {
+                'player_id': p_id, 'name': p_name,
+                'min_played': 0, 'total_pass': 0, 'acc_pass': 0,
+                'total_long_pass': 0, 'acc_long_pass': 0, 'total_short_pass': 0,
+                'acc_short_pass': 0, 'duel_won': 0, 'total_duel': 0, 'aerial_duel_won': 0,
+                'total_aerial_duel': 0, 'cross_claim': 0, 'total_cross': 0, 'saves': 0,
+                'interception': 0, 'xgot_pen': 0, 'xgot_no_pen': 0, 'cd_goal_no_pen': 0, 
+                'cd_goal_pen': 0, 'total_goal_concede': 0, 'match_count': 0
+            }
+
+        if doc['time_range']['start'] == -1: continue
+
+        stats = players_stats[p_id]
+        stats['match_count'] += 1
+        
+        raw_stat = doc['raw_stats'][0].get('statistics', {}) if doc['raw_stats'] else {}
+
+         # Hitung data shot untuk pertandingan ini
+        current_xgot_pen = 0
+        current_xgot_no_pen = 0
+        current_goal_pen = 0
+        current_goal_no_pen = 0
+    
+        for shot in doc.get('shots_conceded', []):
+            shot_type = shot.get('shot_type')
+            situation = shot.get('situation')
+            xgot_value = shot.get('xgot', 0)
+        
+            if shot_type == 'goal':
+                if shot.get('goal_type') == 'penalty':
+                    current_goal_pen += 1
+                else:
+                    current_goal_no_pen += 1 
+        
+            if situation == 'penalty':
+                current_xgot_pen += xgot_value
+            else:
+                current_xgot_no_pen += xgot_value
+    
+        # --- PROSES PENJUMLAHAN (AGREGASI) ---
+        stats['min_played'] += raw_stat.get('minutesPlayed', 0)
+        stats['total_pass'] += raw_stat.get('totalPass', 0)
+        stats['acc_pass'] += raw_stat.get('accuratePass', 0)
+        
+        stats['total_long_pass'] += raw_stat.get('totalLongBalls', 0)
+        stats['acc_long_pass'] += raw_stat.get('accurateLongBalls', 0)
+        stats['total_short_pass'] += (raw_stat.get('totalPass', 0) - raw_stat.get('totalLongBalls', 0))
+        stats['acc_short_pass'] += (raw_stat.get('accuratePass', 0) - raw_stat.get('accurateLongBalls', 0))
+        
+        stats['duel_won'] += raw_stat.get('duelWon', 0)
+        stats['total_duel'] += (raw_stat.get('duelWon', 0) + raw_stat.get('duelLost', 0))
+        stats['aerial_duel_won'] += raw_stat.get('aerialWon', 0)
+        stats['total_aerial_duel'] += (raw_stat.get('aerialWon', 0) + raw_stat.get('aerialLost', 0))
+        
+        stats['cross_claim'] += raw_stat.get('goodHighClaim', 0)
+        stats['total_cross'] += (raw_stat.get('goodHighClaim', 0) + raw_stat.get('crossNotClaimed', 0))
+        
+        stats['saves'] += raw_stat.get('saves', 0)
+        stats['interception'] += raw_stat.get('interceptionWon', 0)
+        
+        stats['xgot_pen'] += current_xgot_pen
+        stats['xgot_no_pen'] += current_xgot_no_pen
+        stats['cd_goal_no_pen'] += current_goal_no_pen
+        stats['cd_goal_pen'] += current_goal_pen
+        stats['total_goal_concede'] += (current_goal_pen + current_goal_no_pen)
+
+    return pd.DataFrame(list(players_stats.values()))
