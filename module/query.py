@@ -192,6 +192,39 @@ def get_match_by_player_id(client, player_id):
     
     return data
 
+def get_matches_by_list_player_id(client, player_ids):
+    db = client['sofascore_data']
+    collection = db['player_match_stats']
+
+    # 1. Query menggunakan $in untuk efisiensi
+    query = {'player_id': {'$in': player_ids}}
+    
+    # Ambil player_id juga agar kita bisa mengelompokkannya
+    projection = {'_id': 0, 'player_id': 1, 'match_id': 1}
+
+    cursor = collection.find(query, projection)
+
+    # 2. Kelompokkan match_id berdasarkan player_id menggunakan dictionary
+    grouped_data = {}
+    for item in cursor:
+        p_id = item['player_id']
+        m_id = item['match_id']
+        
+        if p_id not in grouped_data:
+            grouped_data[p_id] = []
+        
+        # Hindari duplikat match_id untuk pemain yang sama jika perlu
+        if m_id not in grouped_data[p_id]:
+            grouped_data[p_id].append(m_id)
+
+    # 3. Ubah format dictionary menjadi list of dictionaries sesuai permintaan
+    result = [
+        {'player_id': p_id, 'match_ids': m_ids} 
+        for p_id, m_ids in grouped_data.items()
+    ]
+    
+    return result
+
 # Finished
 def get_team_id(client, match_id):
     db = client["sofascore_data"]
