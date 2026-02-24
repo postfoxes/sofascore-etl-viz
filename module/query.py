@@ -1108,7 +1108,7 @@ def get_match_ids_per_round(client, comp_id, season_id, round_num):
     
     return match_ids
 
-def get_gk_detailed_stats(client, comp_id, season_id, player_id):
+def get_gk_detailed_stats(client, player_id):
     db = client['sofascore_data']
 
     # Pastikan query ini mengembalikan list match_ids yang valid
